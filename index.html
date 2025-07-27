@@ -4,6 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ポモドーロタイマー</title>
+
+    <!-- PWA / ホーム画面に追加するための設定 -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ポモドーロ">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍅</text></svg>">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍅</text></svg>">
+
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -228,14 +238,16 @@
                 const newText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
                 if (timerDisplay.textContent !== newText) {
                     timerDisplay.textContent = newText;
-                    document.title = newText;
+                    // アプリとして開いているときはタイトルを更新しない
+                    if (window.matchMedia('(display-mode: browser)').matches) {
+                        document.title = newText;
+                    }
                 }
             }
             
             function updateVisualDisplay(ms) {
                 const totalDurationMs = DURATION[mode] * 1000;
                 const progress = totalDurationMs > 0 ? ms / totalDurationMs : 0;
-                // SVGの円が反時計回りに消えていくように角度を計算
                 const angle = 360 - (progress * 360);
                 const pathData = describeArc(50, 50, 45, angle);
                 progressPath.setAttribute("d", pathData);
@@ -245,7 +257,6 @@
             function animationLoop() {
                 if (!isActive) return;
                 const remainingMs = Math.max(0, endTime - performance.now());
-                // ミリ秒単位で残り時間を計算し、視覚表示を更新
                 updateVisualDisplay(remainingMs); 
                 animationFrameId = requestAnimationFrame(animationLoop);
             }
@@ -275,14 +286,12 @@
                 startPauseBtn.textContent = '一時停止';
                 enterFocusMode();
                 
-                // タイマー終了時刻を計算
                 endTime = performance.now() + timeRemaining * 1000;
                 
                 cancelAnimationFrame(animationFrameId);
                 animationFrameId = requestAnimationFrame(animationLoop);
 
                 Tone.start().catch(e => console.error("Tone.jsの開始に失敗しました:", e));
-                // デジタル表示の更新とタイマー終了判定を行うタイマー
                 logicTimerInterval = setInterval(() => {
                     const remainingSeconds = Math.max(0, (endTime - performance.now()) / 1000);
                     updateDigitalDisplay(remainingSeconds);
@@ -307,7 +316,6 @@
                 clearInterval(logicTimerInterval);
                 cancelAnimationFrame(animationFrameId);
                 
-                // 一時停止した時点での残り時間を正確に保存
                 timeRemaining = Math.max(0, (endTime - performance.now()) / 1000);
             }
             
@@ -334,7 +342,6 @@
             function updateUIForMode(currentMode) {
                 appBody.className = `flex items-center justify-center min-h-screen ${COLORS[currentMode]}`;
                 startPauseBtn.className = `w-48 bg-white ${TEXT_COLORS[currentMode]} text-2xl font-bold py-4 px-8 rounded-lg shadow-md hover:bg-gray-200 transition-all duration-300 transform hover:scale-105 focus-ring-custom`;
-                // プログレスバーの不透明度を調整
                 progressPath.className = `${FILL_COLORS[currentMode]} opacity-60`;
                 modeButtons.forEach(button => {
                     button.classList.toggle('bg-white', button.dataset.mode === currentMode);
