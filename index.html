@@ -21,9 +21,6 @@
         .fade-ui {
             transition: opacity 0.5s ease-in-out;
         }
-        #progress-path {
-            transition: d 0.1s linear;
-        }
         #timer-card {
             transition: background-color 0.5s ease-in-out, box-shadow 0.5s ease-in-out, backdrop-filter 0.5s ease-in-out;
         }
@@ -169,9 +166,11 @@
 
             // --- State ---
             let mode = 'pomodoro';
-            let timeRemaining = DURATION.pomodoro;
+            let timeRemaining = DURATION.pomodoro; // in seconds
             let isActive = false;
-            let timerInterval = null;
+            let logicTimerInterval = null;
+            let animationFrameId = null;
+            let endTime = 0; // Timestamp for when the timer ends
             let pomodoroCount = 0;
             let sessionCount = 1;
 
@@ -186,10 +185,11 @@
                 shortBreak: 'text-teal-400',
                 longBreak: 'text-blue-400',
             };
+            // プログレスバーの色をより暗く、背景に近い色に変更
             const FILL_COLORS = {
-                pomodoro: 'fill-red-800',
-                shortBreak: 'fill-teal-800',
-                longBreak: 'fill-blue-800',
+                pomodoro: 'fill-red-950',
+                shortBreak: 'fill-teal-950',
+                longBreak: 'fill-blue-950',
             };
 
             // --- Helper Functions ---
@@ -218,21 +218,36 @@
 
                 const largeArcFlag = angle <= 180 ? "0" : "1";
                 const d = ["M", start.x, start.y, "A", radius, radius, 0, largeArcFlag, 1, end.x, end.y, "L", x, y, "Z"].join(" ");
-                return d.replace("A", "A");
+                return d;
             }
             
-            // --- Core Functions ---
-            function updateDisplay() {
-                const minutes = Math.floor(timeRemaining / 60);
-                const seconds = timeRemaining % 60;
-                timerDisplay.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-                document.title = timerDisplay.textContent;
-                
-                const totalDuration = DURATION[mode];
-                const progress = totalDuration > 0 ? timeRemaining / totalDuration : 0;
+            // --- Display Update Functions ---
+            function updateDigitalDisplay(secs) {
+                const minutes = Math.floor(secs / 60);
+                const seconds = Math.floor(secs % 60);
+                const newText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                if (timerDisplay.textContent !== newText) {
+                    timerDisplay.textContent = newText;
+                    document.title = newText;
+                }
+            }
+            
+            function updateVisualDisplay(ms) {
+                const totalDurationMs = DURATION[mode] * 1000;
+                const progress = totalDurationMs > 0 ? ms / totalDurationMs : 0;
+                // SVGの円が反時計回りに消えていくように角度を計算
                 const angle = 360 - (progress * 360);
                 const pathData = describeArc(50, 50, 45, angle);
                 progressPath.setAttribute("d", pathData);
+            }
+
+            // --- Animation Loop ---
+            function animationLoop() {
+                if (!isActive) return;
+                const remainingMs = Math.max(0, endTime - performance.now());
+                // ミリ秒単位で残り時間を計算し、視覚表示を更新
+                updateVisualDisplay(remainingMs); 
+                animationFrameId = requestAnimationFrame(animationLoop);
             }
 
             // --- Focus Mode Control ---
@@ -253,22 +268,34 @@
                 if (isActive) pauseTimer();
             };
 
+            // --- Timer Control Functions ---
             function startTimer() {
                 if (isActive) return;
                 isActive = true;
                 startPauseBtn.textContent = '一時停止';
                 enterFocusMode();
+                
+                // タイマー終了時刻を計算
+                endTime = performance.now() + timeRemaining * 1000;
+                
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = requestAnimationFrame(animationLoop);
+
                 Tone.start().catch(e => console.error("Tone.jsの開始に失敗しました:", e));
-                timerInterval = setInterval(() => {
-                    if (timeRemaining > 0) {
-                        timeRemaining--;
-                        updateDisplay();
-                    } else {
-                        clearInterval(timerInterval);
+                // デジタル表示の更新とタイマー終了判定を行うタイマー
+                logicTimerInterval = setInterval(() => {
+                    const remainingSeconds = Math.max(0, (endTime - performance.now()) / 1000);
+                    updateDigitalDisplay(remainingSeconds);
+
+                    if (remainingSeconds <= 0) {
+                        timeRemaining = 0;
+                        updateDigitalDisplay(0);
+                        clearInterval(logicTimerInterval);
+                        cancelAnimationFrame(animationFrameId);
                         playFinishSound();
                         handleTimerEnd();
                     }
-                }, 1000);
+                }, 250);
             }
 
             function pauseTimer() {
@@ -276,21 +303,25 @@
                 isActive = false;
                 startPauseBtn.textContent = '開始';
                 exitFocusMode();
-                clearInterval(timerInterval);
+                
+                clearInterval(logicTimerInterval);
+                cancelAnimationFrame(animationFrameId);
+                
+                // 一時停止した時点での残り時間を正確に保存
+                timeRemaining = Math.max(0, (endTime - performance.now()) / 1000);
             }
             
             function resetTimer() {
                 pauseTimer();
                 timeRemaining = DURATION[mode];
-                updateDisplay();
+                updateDigitalDisplay(timeRemaining);
+                updateVisualDisplay(timeRemaining * 1000);
             }
 
             function switchMode(newMode) {
                 mode = newMode;
-                pauseTimer();
-                timeRemaining = DURATION[mode];
+                resetTimer();
                 updateUIForMode(newMode);
-                updateDisplay();
             }
             
             function handleTimerEnd() {
@@ -298,13 +329,13 @@
                 const nextMode = mode === 'pomodoro' ? (pomodoroCount % 4 === 0 ? 'longBreak' : 'shortBreak') : 'pomodoro';
                 if (nextMode === 'pomodoro') sessionCount++;
                 switchMode(nextMode);
-                pauseTimer();
             }
 
             function updateUIForMode(currentMode) {
                 appBody.className = `flex items-center justify-center min-h-screen ${COLORS[currentMode]}`;
                 startPauseBtn.className = `w-48 bg-white ${TEXT_COLORS[currentMode]} text-2xl font-bold py-4 px-8 rounded-lg shadow-md hover:bg-gray-200 transition-all duration-300 transform hover:scale-105 focus-ring-custom`;
-                progressPath.className = `${FILL_COLORS[currentMode]} opacity-70`;
+                // プログレスバーの不透明度を調整
+                progressPath.className = `${FILL_COLORS[currentMode]} opacity-60`;
                 modeButtons.forEach(button => {
                     button.classList.toggle('bg-white', button.dataset.mode === currentMode);
                     button.classList.toggle('text-white', button.dataset.mode !== currentMode);
@@ -389,7 +420,8 @@
 
             // --- Initial Setup ---
             updateUIForMode('pomodoro');
-            updateDisplay();
+            updateDigitalDisplay(timeRemaining);
+            updateVisualDisplay(timeRemaining * 1000);
         });
     </script>
 </body>
